@@ -61,7 +61,7 @@ fn get_ucontext() -> Result<crash_context::ucontext_t> {
 fn get_crash_context(tid: Pid) -> CrashContext {
     let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
-    #[cfg(not(target_arch = "arm"))]
+    #[cfg(not(any(target_arch = "arm", target_arch = "e2k")))]
     let float_state = unsafe { std::mem::zeroed() };
     CrashContext {
         inner: crash_context::CrashContext {
@@ -69,7 +69,7 @@ fn get_crash_context(tid: Pid) -> CrashContext {
             pid: std::process::id() as _,
             tid,
             context,
-            #[cfg(not(target_arch = "arm"))]
+            #[cfg(not(any(target_arch = "arm", target_arch = "e2k")))]
             float_state,
         },
     }
