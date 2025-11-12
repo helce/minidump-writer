@@ -41,7 +41,14 @@ pub fn write(
         location: list_header.location(),
     };
 
-    let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
+    // Extend size to keep MDRawE2KThreadExtend, it has the same size as
+    // MDRawThread, so just double the num of threads here
+    let array_size = if cfg!(target_arch = "e2k") {
+        num_threads * 2
+    } else {
+        num_threads
+    };
+    let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, array_size)?;
     dirent.location.data_size += thread_list.location().data_size;
     // If there's a minidump size limit, check if it might be exceeded.  Since
     // most of the space is filled with stack data, just check against that.
@@ -68,6 +75,14 @@ pub fn write(
             teb: 0,
             stack: MDMemoryDescriptor::default(),
             thread_context: MDLocationDescriptor::default(),
+        };
+
+        #[cfg(target_arch = "e2k")]
+        let mut e2k_thread = MDRawE2kThreadExtend {
+            thread_id: item.tid.try_into()?,
+            proc_stack: MDMemoryDescriptor::default(),
+            chain_stack: MDMemoryDescriptor::default(),
+            unused: 0,
         };
 
         // We have a different source of information for the crashing thread. If
@@ -131,6 +146,15 @@ pub fn write(
             let mut cpu: RawContextCPU = Default::default();
             let crash_context = config.crash_context.as_ref().unwrap();
             crash_context.fill_cpu_context(&mut cpu);
+            #[cfg(target_arch = "e2k")]
+            {
+                let psb = crash_context.get_proc_stack_base();
+                let psp = crash_context.get_proc_stack_pointer();
+                let pcsb = crash_context.get_chain_stack_base();
+                let pcsp = crash_context.get_chain_stack_pointer();
+                fill_thread_hw_stack(config, buffer, &mut e2k_thread, psb, psp, true)?;
+                fill_thread_hw_stack(config, buffer, &mut e2k_thread, pcsb, pcsp, false)?;
+            }
             let cpu_section = MemoryWriter::alloc_with_val(buffer, cpu)?;
             thread.thread_context = cpu_section.location();
 
@@ -157,6 +181,13 @@ pub fn write(
 
             let mut cpu = RawContextCPU::default();
             info.fill_cpu_context(&mut cpu);
+            #[cfg(target_arch = "e2k")]
+            {
+                let psp = info.get_proc_stack_pointer();
+                let pcsp = info.get_chain_stack_pointer();
+                fill_thread_hw_stack(config, buffer, &mut e2k_thread, info.proc_stack_base, psp, true)?;
+                fill_thread_hw_stack(config, buffer, &mut e2k_thread, info.chain_stack_base, pcsp, false)?;
+            }
             let cpu_section = MemoryWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
             thread.thread_context = cpu_section.location();
             if item.tid == config.blamed_thread {
@@ -170,6 +201,11 @@ pub fn write(
             }
         }
         thread_list.set_value_at(buffer, thread, idx)?;
+        #[cfg(target_arch = "e2k")]
+        {
+            let tmp_thread = unsafe { std::mem::transmute::<MDRawE2kThreadExtend,MDRawThread>(e2k_thread) };
+            thread_list.set_value_at(buffer, tmp_thread, num_threads + idx)?;
+        }
     }
     Ok(dirent)
 }
@@ -227,6 +263,35 @@ fn fill_thread_stack(
         thread.stack.start_of_memory_range = valid_stack_ptr as u64;
         thread.stack.memory = stack_location;
         config.memory_blocks.push(thread.stack);
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "e2k")]
+fn fill_thread_hw_stack(
+    config: &mut MinidumpWriter,
+    buffer: &mut DumpBuf,
+    thread: &mut MDRawE2kThreadExtend,
+    stack_base: usize,
+    stack_ptr: usize,
+    is_procedure: bool,
+) -> Result<(), errors::SectionThreadListError> {
+    let stack_len = stack_ptr - stack_base;
+    let stack_bytes =
+        PtraceDumper::copy_from_process(thread.thread_id.try_into()?, stack_base, stack_len)?;
+    let stack_location = MDLocationDescriptor {
+        data_size: stack_bytes.len() as u32,
+        rva: buffer.position() as u32,
+    };
+    buffer.write_all(&stack_bytes);
+    if is_procedure {
+        thread.proc_stack.start_of_memory_range = stack_base as u64;
+        thread.proc_stack.memory = stack_location;
+        config.memory_blocks.push(thread.proc_stack);
+    } else {
+        thread.chain_stack.start_of_memory_range = stack_base as u64;
+        thread.chain_stack.memory = stack_location;
+        config.memory_blocks.push(thread.chain_stack);
     }
     Ok(())
 }

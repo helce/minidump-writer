@@ -15,5 +15,7 @@ cfg_if::cfg_if! {
         mod aarch64;
     } else if #[cfg(target_arch = "arm")] {
         mod arm;
+    } else if #[cfg(target_arch = "e2k")] {
+        mod e2k;
     }
 }

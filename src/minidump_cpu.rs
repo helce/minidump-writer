@@ -20,6 +20,8 @@ cfg_if::cfg_if! {
         pub type RawContextCPU = minidump_common::format::CONTEXT_ARM64_OLD;
     } else if #[cfg(target_arch = "mips")] {
         compile_error!("flesh me out");
+    } else if #[cfg(target_arch = "e2k")] {
+        pub type RawContextCPU = minidump_common::format::CONTEXT_E2K;
     } else {
         compile_error!("unsupported target architecture");
     }

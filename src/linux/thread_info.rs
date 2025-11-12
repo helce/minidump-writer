@@ -20,6 +20,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_arch = "mips")] {
         mod mips;
         pub type ThreadInfo = mips::ThreadInfoMips;
+    } else if #[cfg(target_arch = "e2k")] {
+        mod e2k;
+        pub type ThreadInfo = e2k::ThreadInfoE2k;
     }
 }
 
@@ -104,6 +107,34 @@ trait CommonThreadInfo {
                 libc::pid_t::from(pid),
                 flag.unwrap_or(NT_Elf::NT_NONE),
                 data.as_mut_ptr(),
+            )
+        };
+        Errno::result(res)?;
+        Ok(unsafe { data.assume_init() })
+    }
+
+    /// SLIGHTLY MODIFIED COPY FROM CRATE nix
+    /// Function for ptrace requests that return values from the data field.
+    /// Some ptrace get requests populate structs or larger elements than `c_long`
+    /// and therefore use the data field to return values. This function handles these
+    /// requests.
+    #[cfg(target_arch = "e2k")]
+    fn ptrace_getregs_data(
+        request: ptrace::RequestType,
+        pid: nix::unistd::Pid,
+    ) -> Result<libc::user_regs_struct> {
+        let mut data = std::mem::MaybeUninit::<libc::user_regs_struct>::uninit();
+        let ptr = data.as_mut_ptr();
+        unsafe {
+            std::ptr::addr_of_mut!((*ptr).sizeof_struct)
+                .write(std::mem::size_of::<libc::user_regs_struct>() as libc::c_ulonglong);
+        }
+        let res = unsafe {
+            libc::ptrace(
+                request,
+                libc::pid_t::from(pid),
+                NT_Elf::NT_NONE,
+                ptr,
             )
         };
         Errno::result(res)?;

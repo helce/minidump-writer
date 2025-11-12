@@ -13,6 +13,9 @@ pub use minidump_common::format::{
     VS_FIXEDFILEINFO as MDVSFixedFileInfo,
 };
 
+#[cfg(target_arch = "e2k")]
+pub use minidump_common::format::MINIDUMP_THREAD_E2K as MDRawE2kThreadExtend;
+
 /* An MDRVA is an offset into the minidump file.  The beginning of the
  * MDRawHeader is at offset 0. */
 pub type MDRVA = u32;
@@ -29,6 +32,8 @@ cfg_if::cfg_if! {
             pub cpuid: [u64; 2],
             _padding: [u32; 2],
         }
+    } else if #[cfg(target_arch = "e2k")] {
+        pub use format::E2KCpuInfo as MDCPUInformation;
     }
 }
 
