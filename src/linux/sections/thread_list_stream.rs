@@ -80,9 +80,10 @@ pub fn write(
         #[cfg(target_arch = "e2k")]
         let mut e2k_thread = MDRawE2kThreadExtend {
             thread_id: item.tid.try_into()?,
+            _pad0: 0,
             proc_stack: MDMemoryDescriptor::default(),
             chain_stack: MDMemoryDescriptor::default(),
-            unused: 0,
+            _pad1: 0,
         };
 
         // We have a different source of information for the crashing thread. If
