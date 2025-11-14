@@ -2,6 +2,8 @@ use std::cmp::min;
 
 use super::*;
 use crate::{minidump_cpu::RawContextCPU, minidump_writer::CrashingThreadContext};
+#[cfg(target_arch = "e2k")]
+use scroll::{Pread, Pwrite, SizeWith};
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
@@ -41,14 +43,16 @@ pub fn write(
         location: list_header.location(),
     };
 
-    // Extend size to keep MDRawE2KThreadExtend, it has the same size as
-    // MDRawThread, so just double the num of threads here
-    let array_size = if cfg!(target_arch = "e2k") {
-        num_threads * 2
-    } else {
-        num_threads
-    };
-    let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, array_size)?;
+    #[cfg(target_arch = "e2k")]
+    #[derive(Debug, Clone, Pread, Pwrite, SizeWith)]
+    struct MDRawThreadExtend {
+        thread: MDRawThread,
+        e2k_thread: MDRawE2kThreadExtend,
+    }
+    #[cfg(target_arch = "e2k")]
+    let mut thread_list = MemoryArrayWriter::<MDRawThreadExtend>::alloc_array(buffer, num_threads)?;
+    #[cfg(not(target_arch = "e2k"))]
+    let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
     dirent.location.data_size += thread_list.location().data_size;
     // If there's a minidump size limit, check if it might be exceeded.  Since
     // most of the space is filled with stack data, just check against that.
@@ -201,12 +205,13 @@ pub fn write(
                 ));
             }
         }
-        thread_list.set_value_at(buffer, thread, idx)?;
+
         #[cfg(target_arch = "e2k")]
-        {
-            let tmp_thread = unsafe { std::mem::transmute::<MDRawE2kThreadExtend,MDRawThread>(e2k_thread) };
-            thread_list.set_value_at(buffer, tmp_thread, num_threads + idx)?;
-        }
+        let thread = MDRawThreadExtend {
+            thread: thread,
+            e2k_thread: e2k_thread,
+        };
+        thread_list.set_value_at(buffer, thread, idx)?;
     }
     Ok(dirent)
 }
