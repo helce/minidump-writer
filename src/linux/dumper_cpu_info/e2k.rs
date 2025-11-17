@@ -23,8 +23,8 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     let vendor_id_name = "vendor_id";
     let mut cpu_info_table = [
         CpuInfoEntry::new("processor", 0),
-        CpuInfoEntry::new("model", 0),
         CpuInfoEntry::new("cpu family", 0),
+        CpuInfoEntry::new("model", 0),
         CpuInfoEntry::new("revision", 0),
     ];
 
