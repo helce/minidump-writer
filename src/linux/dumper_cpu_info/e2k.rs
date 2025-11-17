@@ -44,13 +44,10 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             continue;
         }
 
-        let (field, value) = if let Some(ind) = line.find(':') {
-            (&line[..ind], Some(&line[ind + 1..]))
-        } else {
-            (line.as_str(), None)
-        };
+        let mut liter = line.split(':').map(|x| x.trim());
+        let field = liter.next().unwrap(); // guaranteed to have at least one item
 
-        if let Some(val) = value {
+        if let Some(val) = liter.next() {
             for entry in cpu_info_table.iter_mut() {
                 if field == entry.field {
                     if let Ok(v) = val.parse() {
