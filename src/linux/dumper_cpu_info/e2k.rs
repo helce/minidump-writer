@@ -23,8 +23,8 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     let vendor_id_name = "vendor_id";
     let mut cpu_info_table = [
         CpuInfoEntry::new("processor", 0),
-        CpuInfoEntry::new("cpu family", 0),
         CpuInfoEntry::new("model", 0),
+        CpuInfoEntry::new("cpu family", 0),
         CpuInfoEntry::new("revision", 0),
     ];
 
@@ -87,7 +87,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         .cpu
         .data
         .pwrite_with(
-            cpu_info_table[1].value as u32,
+            cpu_info_table[2].value as u32,
             3 * std::mem::size_of::<u32>(),
             scroll::Endian::Little,
         )
@@ -96,7 +96,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         .cpu
         .data
         .pwrite_with(
-            cpu_info_table[2].value as u32,
+            cpu_info_table[1].value as u32,
             4 * std::mem::size_of::<u32>(),
             scroll::Endian::Little,
         )
