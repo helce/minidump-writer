@@ -9,12 +9,10 @@ pub use minidump_common::format::{
     MINIDUMP_MEMORY_INFO_LIST as MDMemoryInfoList, MINIDUMP_MODULE as MDRawModule,
     MINIDUMP_SIGNATURE as MD_HEADER_SIGNATURE, MINIDUMP_STREAM_TYPE as MDStreamType,
     MINIDUMP_SYSTEM_INFO as MDRawSystemInfo, MINIDUMP_THREAD as MDRawThread,
+    MINIDUMP_THREAD_E2K as MDRawE2kThreadExtend, MINIDUMP_THREAD_EXTEND as MDRawThreadExtend,
     MINIDUMP_THREAD_NAME as MDRawThreadName, MINIDUMP_VERSION as MD_HEADER_VERSION,
     VS_FIXEDFILEINFO as MDVSFixedFileInfo,
 };
-
-#[cfg(target_arch = "e2k")]
-pub use minidump_common::format::MINIDUMP_THREAD_E2K as MDRawE2kThreadExtend;
 
 /* An MDRVA is an offset into the minidump file.  The beginning of the
  * MDRawHeader is at offset 0. */

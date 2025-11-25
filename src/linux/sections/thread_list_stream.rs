@@ -2,8 +2,6 @@ use std::cmp::min;
 
 use super::*;
 use crate::{minidump_cpu::RawContextCPU, minidump_writer::CrashingThreadContext};
-#[cfg(target_arch = "e2k")]
-use scroll::{Pread, Pwrite, SizeWith};
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
@@ -43,12 +41,6 @@ pub fn write(
         location: list_header.location(),
     };
 
-    #[cfg(target_arch = "e2k")]
-    #[derive(Debug, Clone, Pread, Pwrite, SizeWith)]
-    struct MDRawThreadExtend {
-        thread: MDRawThread,
-        e2k_thread: MDRawE2kThreadExtend,
-    }
     #[cfg(target_arch = "e2k")]
     let mut thread_list = MemoryArrayWriter::<MDRawThreadExtend>::alloc_array(buffer, num_threads)?;
     #[cfg(not(target_arch = "e2k"))]
@@ -282,6 +274,11 @@ fn fill_thread_hw_stack(
     stack_ptr: usize,
     is_procedure: bool,
 ) -> Result<(), errors::SectionThreadListError> {
+    let page_size = match nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE) {
+        Ok(Some(ps)) => ps as usize,
+        _ => 1 as usize,
+    };
+    let stack_ptr = (stack_ptr + (page_size - 1)) & !(page_size - 1);
     let stack_len = stack_ptr - stack_base;
     let stack_bytes =
         PtraceDumper::copy_from_process(thread.thread_id.try_into()?, stack_base, stack_len)?;

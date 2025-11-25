@@ -50,12 +50,5 @@ impl CrashContext {
         out.cr1_hi = self.inner.context.uc_mcontext.cr1_hi;
         out.pcsp_lo = self.inner.context.uc_mcontext.pcsp_lo;
         out.pcsp_hi = self.inner.context.uc_mcontext.pcsp_hi;
-
-        // ucontext doesnot have fields for global registers,
-        // but we can save them to some other undefined field
-        // with the same size, let it be sbbp
-        for idx in 0..32 {
-            out.g[idx] = self.inner.context.uc_mcontext.sbbp[idx];
-        }
     }
 }

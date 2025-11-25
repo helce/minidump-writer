@@ -61,9 +61,6 @@ impl ThreadInfoE2k {
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
         out.context_flags = ContextFlagsCpu::CONTEXT_E2K.bits();
-        for idx in 0..32 {
-            out.g[idx] = self.regs.g[idx];
-        }
 
         out.usbr = self.regs.usbr;
         out.usd_lo = self.regs.usd_lo;
