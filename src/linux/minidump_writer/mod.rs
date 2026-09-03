@@ -1,23 +1,23 @@
 use {
     super::{
+        Pid,
         app_memory::AppMemoryList,
         auxv::AuxvDumpInfo,
         crash_context::CrashContext,
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
-        mem_reader::CopyFromProcessError,
-        module_reader,
+        process_reader::{CopyFromProcessError, ProcessReader},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
-        Pid,
     },
     crate::{
         dir_section::{DirSection, DumpBuf},
         mem_writer::{
-            write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError,
+            Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError, write_string_to_location,
         },
         minidump_format::*,
+        module_reader,
         serializers::*,
     },
     error_graph::{ErrorList, WriteErrorList},
@@ -28,8 +28,8 @@ use {
         sys::{ptrace, signal, wait},
     },
     procfs_core::{
-        process::{MMPermissions, ProcState, Stat},
         FromRead,
+        process::{MMPermissions, ProcState, Stat},
     },
     std::{
         io::{Seek, Write},
@@ -369,91 +369,60 @@ impl MinidumpWriter {
         let dirent = self.write_memory_info_list_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, "/proc/cpuinfo") {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCpuInfo as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteCpuInfoFailed(e));
-                Default::default()
-            }
+        let mut proc_root = {
+            let mut pr = String::with_capacity(24);
+            use std::fmt::Write;
+            write!(&mut pr, "/proc/{}/", self.blamed_thread).unwrap(); // infallbile barring OOM
+            pr
         };
-        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/status", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxProcStatus as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteThreadProcStatusFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        macro_rules! file_entry {
+            (res $write:expr, $kind:ident, $err:ident) => {
+                let dirent = match $write {
+                    Ok(location) => MDRawDirectory {
+                        stream_type: MDStreamType::$kind as u32,
+                        location,
+                    },
+                    Err(e) => {
+                        soft_errors.push(WriterError::$err(e));
+                        Default::default()
+                    }
+                };
+                dir_section.write_to_file(buffer, Some(dirent))?;
+            };
+            ($fname:literal, $kind:ident, $err:ident) => {
+                let trunc = proc_root.len();
+                proc_root.push_str($fname);
 
-        let dirent = match write_file(buffer, "/etc/lsb-release")
-            .or_else(|_| write_file(buffer, "/etc/os-release"))
+                file_entry!(res write_file(buffer, &proc_root), $kind, $err);
+
+                proc_root.truncate(trunc);
+            };
+        }
+
+        file_entry!(
+            res write_file(buffer, "/proc/cpuinfo"),
+            LinuxCpuInfo,
+            WriteCpuInfoFailed
+        );
+        file_entry!("status", LinuxProcStatus, WriteThreadProcStatusFailed);
+
+        // Unfortunately neither of these files exist on Android, and there doesn't seem
+        // to be a way to read equivalent information from elsewhere on the file system
+        #[cfg(not(target_os = "android"))]
         {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxLsbRelease as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteOsReleaseInfoFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+            file_entry!(
+                res write_file(buffer, "/etc/lsb-release")
+                    .or_else(|_| write_file(buffer, "/etc/os-release")),
+                LinuxLsbRelease,
+                WriteOsReleaseInfoFailed
+            );
+        }
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCmdLine as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteCommandLineFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxEnviron as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteEnvironmentFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxAuxv as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteAuxvFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxMaps as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteMapsFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        file_entry!("cmdline", LinuxCmdLine, WriteCommandLineFailed);
+        file_entry!("environ", LinuxEnviron, WriteEnvironmentFailed);
+        file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
+        file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
         let dirent = match dso_debug::write_dso_debug_stream(buffer, self.process_id, &self.auxv) {
             Ok(dirent) => dirent,
@@ -464,17 +433,7 @@ impl MinidumpWriter {
         };
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/limits", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::MozLinuxLimits as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteLimitsFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
 
         let dirent = self.write_thread_names_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
@@ -761,14 +720,7 @@ impl MinidumpWriter {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        let maps_path = format!("/proc/{}/maps", self.process_id);
-        let maps_file =
-            std::fs::File::open(&maps_path).map_err(|e| InitError::IOError(maps_path, e))?;
-
-        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
-            .map_err(InitError::ReadProcessMapFileFailed)?;
-
-        self.mappings = MappingInfo::aggregate(maps, self.auxv.get_linux_gate_address())
+        self.mappings = MappingInfo::for_pid(self.process_id, self.auxv.get_linux_gate_address())
             .map_err(InitError::AggregateMappingsFailed)?;
 
         // Although the initial executable is usually the first mapping, it's not
@@ -934,25 +886,24 @@ impl MinidumpWriter {
                 continue;
             }
 
-            if let Some(stack_map) = stack_mapping {
-                if stack_map.contains_address(addr) {
-                    continue;
-                }
+            if let Some(stack_map) = stack_mapping
+                && stack_map.contains_address(addr)
+            {
+                continue;
             }
-            if let Some(last_hit) = last_hit_mapping {
-                if last_hit.contains_address(addr) {
-                    continue;
-                }
+            if let Some(last_hit) = last_hit_mapping
+                && last_hit.contains_address(addr)
+            {
+                continue;
             }
 
             let test = addr >> shift;
-            if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
-                if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
-                    if hit_mapping.is_executable() {
-                        last_hit_mapping = Some(hit_mapping);
-                        continue;
-                    }
-                }
+            if (could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0)
+                && let Some(hit_mapping) = self.find_mapping_no_bias(addr)
+                && hit_mapping.is_executable()
+            {
+                last_hit_mapping = Some(hit_mapping);
+                continue;
             }
             sp.copy_from_slice(&defaced);
         }
@@ -994,9 +945,33 @@ impl MinidumpWriter {
         mapping: &MappingInfo,
         pid: Pid,
     ) -> Result<T, WriterError> {
+        let reader = ProcessReader::new(pid);
         Ok(T::read_from_module(
-            module_reader::ProcessReader::new(pid, mapping.start_address).into(),
+            module_reader::ModuleMemory::from_process(&reader, mapping.start_address),
         )?)
+    }
+
+    /// Copies a block of bytes from the target process, returning the heap
+    /// allocated copy
+    #[inline]
+    pub fn copy_from_process(
+        pid: Pid,
+        src: usize,
+        length: usize,
+    ) -> Result<Vec<u8>, CopyFromProcessError> {
+        let length = std::num::NonZeroUsize::new(length).ok_or(CopyFromProcessError {
+            src,
+            child: pid,
+            offset: 0,
+            length,
+            // TODO: We should make copy_from_process also take a NonZero,
+            // as EINVAL could also come from the syscalls that actually read
+            // memory as well which could be confusing
+            source: nix::errno::Errno::EINVAL,
+        })?;
+
+        let mem = ProcessReader::new(pid);
+        mem.read_to_vec(src, length)
     }
 }
 

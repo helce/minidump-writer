@@ -1,5 +1,6 @@
 use {
     super::super::{
+        Pid,
         auxv::AuxvError,
         dso_debug::SectionDsoDebugError,
         maps_reader::MapsReaderError,
@@ -13,7 +14,6 @@ use {
         },
         module_reader::ModuleReaderError,
         serializers::*,
-        Pid,
     },
     crate::{dir_section::FileWriterError, mem_writer::MemoryWriterError, serializers::*},
     error_graph::ErrorList,
@@ -200,12 +200,6 @@ pub enum InitError {
     EnumerateThreadsErrors(#[source] ErrorList<InitError>),
     #[error("Failed to enumerate threads")]
     EnumerateThreadsFailed(#[source] Box<InitError>),
-    #[error("Failed to read process map file")]
-    ReadProcessMapFileFailed(
-        #[source]
-        #[serde(serialize_with = "serialize_proc_error")]
-        ProcError,
-    ),
     #[error("Failed to aggregate process mappings")]
     AggregateMappingsFailed(#[source] MapsReaderError),
     #[error("Failed to enumerate process mappings")]

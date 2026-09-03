@@ -1,9 +1,13 @@
-//! Functionality for reading a remote process's memory
-
 use {
-    super::{Pid, minidump_writer::MinidumpWriter, serializers::*},
+    super::{Pid, maps_reader::MappingInfo, serializers::*},
+    crate::module_reader::ModuleMemory,
     std::sync::OnceLock,
 };
+
+#[cfg(target_os = "android")]
+use super::module_reader::SoName;
+
+pub type ProcessHandle = libc::pid_t;
 
 #[derive(Debug)]
 enum Style {
@@ -43,13 +47,21 @@ pub struct CopyFromProcessError {
     pub source: nix::Error,
 }
 
-pub struct MemReader {
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum FindModuleError {
+    #[error("Module not found")]
+    ModuleNotFound,
+    #[error("Failed to read process module mappings")]
+    MappingError(#[from] super::maps_reader::MapsReaderError),
+}
+
+pub struct ProcessReader {
     /// The pid of the child to read
     pid: nix::unistd::Pid,
     style: OnceLock<Style>,
 }
 
-impl std::fmt::Debug for MemReader {
+impl std::fmt::Debug for ProcessReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self.style.get() {
             Some(Style::VirtualMem) => "process_vm_readv",
@@ -68,11 +80,11 @@ impl std::fmt::Debug for MemReader {
     }
 }
 
-impl MemReader {
+impl ProcessReader {
     /// Creates a [`Self`] for the specified process id, the method used will
     /// be probed for on the first access
     #[inline]
-    pub fn new(pid: i32) -> Self {
+    pub fn new(pid: ProcessHandle) -> Self {
         Self {
             pid: nix::unistd::Pid::from_raw(pid),
             style: OnceLock::default(),
@@ -108,18 +120,9 @@ impl MemReader {
         }
     }
 
-    #[inline]
-    pub fn read_to_vec(
-        &self,
-        src: usize,
-        length: std::num::NonZeroUsize,
-    ) -> Result<Vec<u8>, CopyFromProcessError> {
-        let mut output = vec![0u8; length.into()];
-        let bytes_read = self.read(src, &mut output)?;
-        output.truncate(bytes_read);
-        Ok(output)
-    }
-
+    /// Read memory from the process into the given buffer.
+    ///
+    /// Returns the number of bytes read.
     pub fn read(&self, src: usize, dst: &mut [u8]) -> Result<usize, CopyFromProcessError> {
         if let Some(rs) = self.style.get() {
             let res = match rs {
@@ -232,29 +235,32 @@ impl MemReader {
 
         Ok(dst.len())
     }
-}
 
-impl MinidumpWriter {
-    /// Copies a block of bytes from the target process, returning the heap
-    /// allocated copy
-    #[inline]
-    pub fn copy_from_process(
-        pid: Pid,
-        src: usize,
-        length: usize,
-    ) -> Result<Vec<u8>, CopyFromProcessError> {
-        let length = std::num::NonZeroUsize::new(length).ok_or(CopyFromProcessError {
-            src,
-            child: pid,
-            offset: 0,
-            length,
-            // TODO: We should make copy_from_process also take a NonZero,
-            // as EINVAL could also come from the syscalls that actually read
-            // memory as well which could be confusing
-            source: nix::errno::Errno::EINVAL,
-        })?;
+    /// Find the address at which a module with the given name is loaded in the process.
+    pub fn find_module(&self, module_name: &str) -> Result<ModuleMemory<'_>, FindModuleError> {
+        MappingInfo::for_pid(self.pid.as_raw(), None)?
+            .into_iter()
+            .find_map(|m| {
+                let mmem = ModuleMemory::from_process(self, m.start_address);
+                let name = m.name.as_ref().and_then(|s| s.to_str())?;
+                if name == module_name {
+                    return Some(mmem);
+                }
+                // Check whether the SO_NAME matches the module name.
+                //
+                // For now, only check the SO_NAME of Android APKS, because libraries may be mapped
+                // directly from within an APK. See bug 1982902.
+                #[cfg(target_os = "android")]
+                if name.ends_with(".apk") {
+                    if let Ok(SoName(so_name)) = mmem.read_from_module() {
+                        if so_name == name {
+                            return Some(mmem);
+                        }
+                    }
+                }
 
-        let mem = MemReader::new(pid);
-        mem.read_to_vec(src, length)
+                None
+            })
+            .ok_or(FindModuleError::ModuleNotFound)
     }
 }

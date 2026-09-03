@@ -4,7 +4,10 @@ use {
     byteorder::{NativeEndian, ReadBytesExt},
     goblin::elf,
     memmap2::{Mmap, MmapOptions},
-    procfs_core::process::{MMPermissions, MMapPath, MemoryMaps},
+    procfs_core::{
+        FromRead,
+        process::{MMPermissions, MMapPath, MemoryMaps},
+    },
     std::{
         ffi::{OsStr, OsString},
         fs::File,
@@ -96,6 +99,14 @@ pub enum MapsReaderError {
     MmapSanityCheckFailed,
     #[error("Symlink does not match ({0} vs. {1})")]
     SymlinkError(std::path::PathBuf, std::path::PathBuf),
+    #[error("Mappings file missing for pid {pid} (is the process still alive?)")]
+    MappingFileMissing { pid: i32 },
+    #[error("Failed to parse memory maps file")]
+    ParsingError(
+        #[from]
+        #[serde(serialize_with = "serialize_proc_error")]
+        procfs_core::ProcError,
+    ),
 }
 
 fn is_mapping_a_path(pathname: Option<&OsStr>) -> bool {
@@ -117,6 +128,20 @@ fn sanitize_path(pathname: OsString) -> OsString {
 }
 
 impl MappingInfo {
+    /// Get the mappings for the given process.
+    pub fn for_pid(pid: i32, linux_gate_loc: Option<AuxvType>) -> Result<Vec<Self>> {
+        let maps_path = format!("/proc/{}/maps", pid);
+        let maps_file = File::open(&maps_path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                MapsReaderError::MappingFileMissing { pid }
+            } else {
+                e.into()
+            }
+        })?;
+        let maps = MemoryMaps::from_read(maps_file)?;
+        Self::aggregate(maps, linux_gate_loc)
+    }
+
     /// Return whether the `name` field is a path (contains a `/`).
     pub fn name_is_path(&self) -> bool {
         is_mapping_a_path(self.name.as_deref())
@@ -157,11 +182,11 @@ impl MappingInfo {
 
             let is_path = is_mapping_a_path(pathname.as_deref());
 
-            if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap()) {
-                if !is_path && start_address == linux_gate_loc {
-                    pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
-                    offset = 0;
-                }
+            if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap())
+                && (!is_path && (start_address == linux_gate_loc))
+            {
+                pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
+                offset = 0;
             }
 
             if let Some(prev_module) = infos.last_mut() {
@@ -292,10 +317,10 @@ impl MappingInfo {
         // because the semantics of the open may be driver-specific so we'd risk
         // hanging the crash dumper. And a file in /dev/ almost certainly has no
         // ELF file identifier anyways.
-        if let Some(name) = name {
-            if name.as_bytes().starts_with(b"/dev/") {
-                return false;
-            }
+        if let Some(name) = name
+            && name.as_bytes().starts_with(b"/dev/")
+        {
+            return false;
         }
         true
     }
@@ -466,11 +491,11 @@ impl SoVersion {
                     if i >= comps.len() - 1 {
                         break;
                     }
-                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit()) {
-                        if let Ok(pre) = comp[pre + 1..].parse() {
-                            *comps[i + 1] = pre;
-                            break;
-                        }
+                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit())
+                        && let Ok(pre) = comp[pre + 1..].parse()
+                    {
+                        *comps[i + 1] = pre;
+                        break;
                     }
                 } else {
                     *comps[i] = comp.parse().unwrap_or_default();
@@ -739,7 +764,12 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
             .get_mapping_effective_path_name_and_version(None)
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
-        assert_eq!(file_path, PathBuf::from("/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"));
+        assert_eq!(
+            file_path,
+            PathBuf::from(
+                "/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"
+            )
+        );
     }
 
     #[test]
