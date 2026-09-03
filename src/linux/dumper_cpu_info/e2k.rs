@@ -1,4 +1,5 @@
 use crate::{errors::CpuInfoError, minidump_format::*};
+use failspot::failspot;
 use scroll::Pwrite;
 use std::{
     fs::File,
@@ -30,6 +31,12 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     // processor_architecture should always be set, do this first
     sys_info.processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_E2K as u16;
+
+    failspot!(
+        CpuInfoFileOpen
+        bail(std::io::Error::other("test requested cpuinfo file failure"))
+    );
+
     let cpuinfo_file = File::open(path::PathBuf::from("/proc/cpuinfo"))?;
     let mut vendor_id = String::new();
 
