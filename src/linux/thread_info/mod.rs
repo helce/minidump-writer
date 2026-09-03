@@ -179,6 +179,7 @@ trait CommonThreadInfo {
     /// Some ptrace get requests populate structs or larger elements than `c_long`
     /// and therefore use the data field to return values. This function handles these
     /// requests.
+    #[cfg(not(target_arch = "e2k"))]
     fn ptrace_get_data_via_io<T>(
         request: ptrace::RequestType,
         flag: Option<NT_Elf>,

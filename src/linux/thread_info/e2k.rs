@@ -1,8 +1,9 @@
-use super::CommonThreadInfo;
-use crate::{errors::ThreadInfoError, minidump_cpu::RawContextCPU, Pid};
-use libc::user_regs_struct;
-use minidump_common::format::ContextFlagsCpu;
-use nix::sys::ptrace;
+use {
+    super::{CommonThreadInfo, Pid, ThreadInfoError},
+    crate::{minidump_cpu::RawContextCPU, minidump_format::format},
+    libc::user_regs_struct,
+    nix::sys::ptrace,
+};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -60,7 +61,7 @@ impl ThreadInfoE2k {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = ContextFlagsCpu::CONTEXT_E2K.bits();
+        out.context_flags = format::ContextFlagsCpu::CONTEXT_E2K.bits();
 
         out.usbr = self.regs.usbr;
         out.usd_lo = self.regs.usd_lo;

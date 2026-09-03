@@ -1,10 +1,12 @@
-use crate::{errors::CpuInfoError, minidump_format::*};
-use failspot::failspot;
-use scroll::Pwrite;
-use std::{
-    fs::File,
-    io::{BufRead, BufReader},
-    path,
+use {
+    super::CpuInfoError,
+    crate::minidump_format::*,
+    failspot::failspot,
+    scroll::Pwrite,
+    std::{
+        io::{BufRead, BufReader},
+        path,
+    },
 };
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
@@ -37,7 +39,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         bail(std::io::Error::other("test requested cpuinfo file failure"))
     );
 
-    let cpuinfo_file = File::open(path::PathBuf::from("/proc/cpuinfo"))?;
+    let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
     let mut vendor_id = String::new();
 
     for line in BufReader::new(cpuinfo_file).lines() {

@@ -63,7 +63,8 @@ impl MinidumpWriter {
         };
 
         #[cfg(target_arch = "e2k")]
-        let mut thread_list = MemoryArrayWriter::<MDRawThreadExtend>::alloc_array(buffer, num_threads)?;
+        let mut thread_list =
+            MemoryArrayWriter::<MDRawThreadExtend>::alloc_array(buffer, num_threads)?;
         #[cfg(not(target_arch = "e2k"))]
         let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
         dirent.location.data_size += thread_list.location().data_size;
@@ -199,8 +200,22 @@ impl MinidumpWriter {
                 {
                     let psp = info.get_proc_stack_pointer();
                     let pcsp = info.get_chain_stack_pointer();
-                    fill_thread_hw_stack(config, buffer, &mut e2k_thread, info.proc_stack_base, psp, true)?;
-                    fill_thread_hw_stack(config, buffer, &mut e2k_thread, info.chain_stack_base, pcsp, false)?;
+                    fill_thread_hw_stack(
+                        config,
+                        buffer,
+                        &mut e2k_thread,
+                        info.proc_stack_base,
+                        psp,
+                        true,
+                    )?;
+                    fill_thread_hw_stack(
+                        config,
+                        buffer,
+                        &mut e2k_thread,
+                        info.chain_stack_base,
+                        pcsp,
+                        false,
+                    )?;
                 }
                 let cpu_section = MemoryWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
                 thread.thread_context = cpu_section.location();

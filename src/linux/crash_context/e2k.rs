@@ -1,6 +1,7 @@
-use super::CrashContext;
-use crate::minidump_cpu::RawContextCPU;
-use minidump_common::format::ContextFlagsCpu;
+use {
+    super::CrashContext,
+    crate::{minidump_cpu::RawContextCPU, minidump_format::format::ContextFlagsCpu},
+};
 
 impl CrashContext {
     pub fn get_stack_pointer(&self) -> usize {
@@ -26,14 +27,14 @@ impl CrashContext {
 
     pub fn get_proc_stack_pointer(&self) -> usize {
         // psp_lo(base) + psp_hi(ind)
-        ((self.inner.context.uc_mcontext.psp_lo & 0xffff_ffff_ffff) +
-         (self.inner.context.uc_mcontext.psp_hi & 0xffff_ffff)) as usize
+        ((self.inner.context.uc_mcontext.psp_lo & 0xffff_ffff_ffff)
+            + (self.inner.context.uc_mcontext.psp_hi & 0xffff_ffff)) as usize
     }
 
     pub fn get_chain_stack_pointer(&self) -> usize {
         // pcsp_lo(base) + pcsp_hi(ind)
-        ((self.inner.context.uc_mcontext.pcsp_lo & 0xffff_ffff_ffff) +
-         (self.inner.context.uc_mcontext.pcsp_hi & 0xffff_ffff)) as usize
+        ((self.inner.context.uc_mcontext.pcsp_lo & 0xffff_ffff_ffff)
+            + (self.inner.context.uc_mcontext.pcsp_hi & 0xffff_ffff)) as usize
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
