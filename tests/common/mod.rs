@@ -14,7 +14,7 @@ fn build_command() -> Command {
     // Anything that needs to spawn a child will need to give it permission to
     // ptrace itself, as Yama LSM will normally only allow a parent to debug
     // a child, not the other way around.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_arch = "e2k")))]
     {
         let rc = unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY) };
         assert_eq!(rc, 0);
