@@ -183,13 +183,14 @@ fn test_thread_list_from_parent() {
 }
 
 // #[cfg(not(any(target_arch = "mips", target_arch = "arm-eabi"))]
-#[cfg(not(target_arch = "mips"))]
+#[cfg(not(any(target_arch = "mips", target_arch = "e2k")))]
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_mappings_include_linux_gate() {
     spawn_child("mappings_include_linux_gate", &[]);
 }
 
+#[cfg(not(target_arch = "e2k"))]
 #[test]
 fn test_linux_gate_mapping_id() {
     disabled_on_ci_and_android!();
