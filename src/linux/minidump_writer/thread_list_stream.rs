@@ -169,8 +169,8 @@ impl MinidumpWriter {
                     let psp = crash_context.get_proc_stack_pointer();
                     let pcsb = crash_context.get_chain_stack_base();
                     let pcsp = crash_context.get_chain_stack_pointer();
-                    fill_thread_hw_stack(config, buffer, &mut e2k_thread, psb, psp, true)?;
-                    fill_thread_hw_stack(config, buffer, &mut e2k_thread, pcsb, pcsp, false)?;
+                    self.fill_thread_hw_stack(buffer, &mut e2k_thread, psb, psp, true)?;
+                    self.fill_thread_hw_stack(buffer, &mut e2k_thread, pcsb, pcsp, false)?;
                 }
                 let cpu_section = MemoryWriter::alloc_with_val(buffer, cpu)?;
                 thread.thread_context = cpu_section.location();
@@ -198,24 +198,12 @@ impl MinidumpWriter {
                 info.fill_cpu_context(&mut cpu);
                 #[cfg(target_arch = "e2k")]
                 {
+                    let psb = info.proc_stack_base;
                     let psp = info.get_proc_stack_pointer();
+                    let pcsb = info.chain_stack_base;
                     let pcsp = info.get_chain_stack_pointer();
-                    fill_thread_hw_stack(
-                        config,
-                        buffer,
-                        &mut e2k_thread,
-                        info.proc_stack_base,
-                        psp,
-                        true,
-                    )?;
-                    fill_thread_hw_stack(
-                        config,
-                        buffer,
-                        &mut e2k_thread,
-                        info.chain_stack_base,
-                        pcsp,
-                        false,
-                    )?;
+                    self.fill_thread_hw_stack(buffer, &mut e2k_thread, psb, psp, true)?;
+                    self.fill_thread_hw_stack(buffer, &mut e2k_thread, pcsb, pcsp, false)?;
                 }
                 let cpu_section = MemoryWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
                 thread.thread_context = cpu_section.location();
@@ -298,21 +286,24 @@ impl MinidumpWriter {
 
     #[cfg(target_arch = "e2k")]
     fn fill_thread_hw_stack(
-        config: &mut MinidumpWriter,
+        &mut self,
         buffer: &mut DumpBuf,
         thread: &mut MDRawE2kThreadExtend,
         stack_base: usize,
         stack_ptr: usize,
         is_procedure: bool,
-    ) -> Result<(), errors::SectionThreadListError> {
+    ) -> Result<(), SectionThreadListError> {
         let page_size = match nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE) {
             Ok(Some(ps)) => ps as usize,
             _ => 1 as usize,
         };
         let stack_ptr = (stack_ptr + (page_size - 1)) & !(page_size - 1);
         let stack_len = stack_ptr - stack_base;
-        let stack_bytes =
-            PtraceDumper::copy_from_process(thread.thread_id.try_into()?, stack_base, stack_len)?;
+        let stack_bytes = MinidumpWriter::copy_from_process(
+            thread.thread_id.try_into()?,
+            stack_base,
+            stack_len,
+        )?;
         let stack_location = MDLocationDescriptor {
             data_size: stack_bytes.len() as u32,
             rva: buffer.position() as u32,
@@ -321,11 +312,11 @@ impl MinidumpWriter {
         if is_procedure {
             thread.proc_stack.start_of_memory_range = stack_base as u64;
             thread.proc_stack.memory = stack_location;
-            config.memory_blocks.push(thread.proc_stack);
+            self.memory_blocks.push(thread.proc_stack);
         } else {
             thread.chain_stack.start_of_memory_range = stack_base as u64;
             thread.chain_stack.memory = stack_location;
-            config.memory_blocks.push(thread.chain_stack);
+            self.memory_blocks.push(thread.chain_stack);
         }
         Ok(())
     }
