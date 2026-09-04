@@ -1,11 +1,8 @@
 use {
-    super::CpuInfoError,
+    super::{CpuInfoError, ProcessInspector},
     crate::minidump_format::*,
     failspot::failspot,
-    std::{
-        io::{BufRead, BufReader},
-        path,
-    },
+    std::io::{BufRead, BufReader},
 };
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
@@ -26,7 +23,10 @@ impl CpuInfoEntry {
     }
 }
 
-pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
+pub fn write_cpu_information(
+    process_inspector: &ProcessInspector,
+    sys_info: &mut MDRawSystemInfo,
+) -> Result<()> {
     let vendor_id_name = "vendor_id";
     let mut cpu_info_table = [
         CpuInfoEntry::new("processor", -1, false),
@@ -39,26 +39,23 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     ];
 
     // processor_architecture should always be set, do this first
-    sys_info.processor_architecture = if cfg!(target_arch = "mips") {
-        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS
-    } else if cfg!(target_arch = "mips64") {
-        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS64
-    } else if cfg!(target_arch = "x86") {
+    sys_info.processor_architecture = if cfg!(target_arch = "x86") {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_INTEL
     } else {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64
     } as u16;
 
-    failspot!(
-        CpuInfoFileOpen
-        bail(std::io::Error::other("test requested cpuinfo file failure"))
-    );
+    if failspot!(CpuInfoFileOpen) {
+        process_inspector.fail_one_syscall_with(libc::EPERM);
+    }
 
-    let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
+    let cpuinfo_file = process_inspector
+        .read_file("/proc/cpuinfo")
+        .map_err(CpuInfoError::ReadFileError)?;
 
     let mut vendor_id = String::new();
     for line in BufReader::new(cpuinfo_file).lines() {
-        let line = line?;
+        let line = line.map_err(CpuInfoError::FileIOError)?;
         // Expected format: <field-name> <space>+ ':' <space> <value>
         // Note that:
         //   - empty lines happen.

@@ -6,14 +6,12 @@ use {
     minidump::*,
     minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*},
     minidump_writer::{
-        Pid,
+        CrashContextExt, Pid,
         app_memory::AppMemory,
-        crash_context::CrashContext,
         maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
-        module_reader::{BuildId, ReadFromModule},
+        module_reader::{self},
     },
-    nix::{errno::Errno, sys::signal::Signal},
     procfs_core::process::MMPermissions,
     serde_json::json,
     std::{
@@ -35,7 +33,7 @@ enum Context {
 impl Context {
     pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
         let mut mw = MinidumpWriterConfig::new(pid, pid);
-        #[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+        #[cfg(not(target_arch = "e2k"))]
         if self == &Context::With {
             let crash_context = get_crash_context(pid);
             mw.set_crash_context(crash_context);
@@ -44,24 +42,25 @@ impl Context {
     }
 }
 
-#[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+#[cfg(not(target_arch = "e2k"))]
 fn get_ucontext() -> Result<crash_context::ucontext_t> {
     let mut context = std::mem::MaybeUninit::uninit();
     unsafe {
         let res = crash_context::crash_context_getcontext(context.as_mut_ptr());
-        Errno::result(res)?;
-
+        if res == -1 {
+            Err(std::io::Error::last_os_error())?;
+        }
         Ok(context.assume_init())
     }
 }
 
-#[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
-fn get_crash_context(tid: Pid) -> CrashContext {
+#[cfg(not(target_arch = "e2k"))]
+fn get_crash_context(tid: Pid) -> CrashContextExt {
     let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
     #[cfg(not(any(target_arch = "arm", target_arch = "e2k")))]
     let float_state = unsafe { std::mem::zeroed() };
-    CrashContext {
+    CrashContextExt {
         inner: crash_context::CrashContext {
             siginfo,
             pid: std::process::id() as _,
@@ -86,7 +85,7 @@ macro_rules! contextual_test {
                 test(Context::Without)
             }
 
-            #[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+            #[cfg(not(target_arch = "e2k"))]
             #[test]
             $(#[$attr])?
             fn with_context() {
@@ -115,7 +114,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
         assert!(meta.len() > 0);
@@ -187,7 +186,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
         let module_list: MinidumpModuleList = dump
@@ -278,7 +277,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Read dump file and check its contents
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
@@ -340,7 +339,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Ensure the MozSoftErrors stream contains the expected errors
         let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
@@ -376,7 +375,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Read dump file and check its contents
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
@@ -450,7 +449,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Read dump file and check its contents. There should be a truncated minidump available
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
@@ -487,7 +486,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Read dump file and check its contents. There should be a truncated minidump available
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
@@ -532,7 +531,7 @@ contextual_test! {
         let waitres = child.wait().expect("Failed to wait for child");
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
-        assert_eq!(status, Signal::SIGKILL as i32);
+        assert_eq!(status, libc::SIGKILL);
 
         // Read dump file and check its contents. There should be a truncated minidump available
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
@@ -701,7 +700,7 @@ fn minidump_size_limit() {
     let waitres = child.wait().expect("Failed to wait for child");
     let status = waitres.signal().expect("Child did not die due to signal");
     assert_eq!(waitres.code(), None);
-    assert_eq!(status, Signal::SIGKILL as i32);
+    assert_eq!(status, libc::SIGKILL);
 }
 
 #[test]
@@ -733,8 +732,9 @@ fn with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let BuildId(mut build_id) =
-        BuildId::read_from_module(mem_slice.as_slice().into()).expect("Failed to get build_id");
+    let mut build_id =
+        module_reader::read_build_id_from_module(SliceModuleMemoryReader(mem_slice.as_slice()))
+            .expect("Failed to get build_id");
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 
@@ -753,7 +753,7 @@ fn with_deleted_binary() {
     let waitres = child.wait().expect("Failed to wait for child");
     let status = waitres.signal().expect("Child did not die due to signal");
     assert_eq!(waitres.code(), None);
-    assert_eq!(status, Signal::SIGKILL as i32);
+    assert_eq!(status, libc::SIGKILL);
 
     // Begin checks on dump
     let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");

@@ -33,7 +33,7 @@ pub enum SectionThreadListError {
         std::num::TryFromIntError,
     ),
     #[error("Failed to copy memory from process")]
-    CopyFromProcessError(#[from] CopyFromProcessError),
+    CopyFromProcessError(#[source] CopyFromProcessError),
     #[error("Failed to get thread info")]
     ThreadInfoError(#[from] ThreadInfoError),
     #[error("Failed to write to memory buffer")]
@@ -150,10 +150,11 @@ impl MinidumpWriter {
                         (end_of_range - ip_memory_d.start_of_memory_range) as u32;
 
                     let memory_copy = MinidumpWriter::copy_from_process(
-                        thread.thread_id as i32,
+                        &self.process_inspector,
                         ip_memory_d.start_of_memory_range as _,
                         ip_memory_d.memory.data_size as usize,
-                    )?;
+                    )
+                    .map_err(SectionThreadListError::CopyFromProcessError)?;
 
                     let mem_section = MemoryArrayWriter::alloc_from_array(buffer, &memory_copy)?;
                     ip_memory_d.memory = mem_section.location();
@@ -248,10 +249,11 @@ impl MinidumpWriter {
             };
 
             let mut stack_bytes = MinidumpWriter::copy_from_process(
-                thread.thread_id.try_into()?,
+                &self.process_inspector,
                 valid_stack_ptr,
                 stack_len,
-            )?;
+            )
+            .map_err(SectionThreadListError::CopyFromProcessError)?;
             let stack_pointer_offset = stack_ptr.saturating_sub(valid_stack_ptr);
             if self.skip_stacks_if_mapping_unreferenced {
                 if let Some(principal_mapping) = &self.principal_mapping {
