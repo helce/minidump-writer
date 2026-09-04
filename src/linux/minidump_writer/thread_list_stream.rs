@@ -303,10 +303,11 @@ impl MinidumpWriter {
         let stack_ptr = (stack_ptr + (page_size - 1)) & !(page_size - 1);
         let stack_len = stack_ptr - stack_base;
         let stack_bytes = MinidumpWriter::copy_from_process(
-            thread.thread_id.try_into()?,
+            &self.process_inspector,
             stack_base,
             stack_len,
-        )?;
+        )
+        .map_err(SectionThreadListError::CopyFromProcessError)?;
         let stack_location = MDLocationDescriptor {
             data_size: stack_bytes.len() as u32,
             rva: buffer.position() as u32,
