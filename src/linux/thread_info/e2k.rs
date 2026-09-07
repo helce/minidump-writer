@@ -1,36 +1,25 @@
 use {
-    super::{CommonThreadInfo, Pid, ThreadInfoError},
-    crate::{minidump_cpu::RawContextCPU, minidump_format::format},
-    libc::user_regs_struct,
-    nix::sys::ptrace,
+    super::{Pid, ProcessInspector, ThreadInfoError},
+    crate::minidump_cpu::RawContextCPU,
 };
 
-type Result<T> = std::result::Result<T, ThreadInfoError>;
-
+#[derive(Debug)]
 pub struct ThreadInfoE2k {
     pub stack_pointer: usize,
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
     // Use the structures defined in <sys/user.h>
-    pub regs: user_regs_struct,
+    pub regs: libc::user_regs_struct,
     pub proc_stack_base: usize,
     pub chain_stack_base: usize,
 }
 
-impl CommonThreadInfo for ThreadInfoE2k {}
-
 impl ThreadInfoE2k {
-    // nix currently doesn't support PTRACE_GETREGS, so we have to do it ourselves
-    fn getregs(pid: Pid) -> Result<user_regs_struct> {
-        Self::ptrace_getregs_data(
-            ptrace::Request::PTRACE_GETREGS as ptrace::RequestType,
-            nix::unistd::Pid::from_raw(pid),
-        )
-    }
-
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
-        let regs = Self::getregs(tid)?;
+    pub fn create(process_inspector: &ProcessInspector, tid: Pid) -> Result<Self, ThreadInfoError> {
+        let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
+        let regs = process_inspector
+            .get_gen_regs(tid)
+            .map_err(ThreadInfoError::PtraceError)?;
         let stack_pointer = (regs.usd_lo & 0xffff_ffff_ffff) as usize;
         let proc_stack_base = (regs.psp_lo & 0xffff_ffff_ffff) as usize;
         let chain_stack_base = (regs.pcsp_lo & 0xffff_ffff_ffff) as usize;
@@ -61,7 +50,8 @@ impl ThreadInfoE2k {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = format::ContextFlagsCpu::CONTEXT_E2K.bits();
+        out.context_flags =
+            crate::minidump_format::format::ContextFlagsCpu::CONTEXT_E2K.bits();
 
         out.usbr = self.regs.usbr;
         out.usd_lo = self.regs.usd_lo;
