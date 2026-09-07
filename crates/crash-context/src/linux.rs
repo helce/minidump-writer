@@ -26,7 +26,7 @@ pub struct CrashContext {
     /// State of floating point registers.
     ///
     /// This isn't part of the user ABI for Linux arm
-    #[cfg(not(target_arch = "arm"))]
+    #[cfg(not(any(target_arch = "arm", target_arch = "e2k")))]
     pub float_state: fpregset_t,
     /// The signal info for the crash
     pub siginfo: libc::signalfd_siginfo,
@@ -257,6 +257,96 @@ cfg_if::cfg_if! {
             pub arm_pc: u32,
             pub arm_cpsr: u32,
             pub fault_address: u32,
+        }
+    } else if #[cfg(target_arch = "e2k")] {
+        #[repr(C)]
+        #[derive(Clone)]
+        #[doc(hidden)]
+        pub struct ucontext_t {
+            pub uc_flags: u64,
+            uc_link: *mut ucontext_t,
+            pub uc_stack: stack_t,
+            pub uc_mcontext: sigcontext,
+            pub uc_sigmask: sigset_t,
+            pub uc_extra: extra_ucontext,
+        }
+
+        #[repr(C)]
+        #[derive(Clone)]
+        #[doc(hidden)]
+        pub struct sigcontext {
+            pub cr0_lo: u64,
+            pub cr0_hi: u64,
+            pub cr1_lo: u64,
+            pub cr1_hi: u64,
+            pub sbr: u64,
+            pub usd_lo: u64,
+            pub usd_hi: u64,
+            pub psp_lo: u64,
+            pub psp_hi: u64,
+            pub pcsp_lo: u64,
+            pub pcsp_hi: u64,
+            pub rpr_hi: u64,
+            pub rpr_lo: u64,
+            pub nr_TIRs: u64,
+            pub tir_lo: [u64; 19],
+            pub tir_hi: [u64; 19],
+            pub trap_cell_addr: [u64; 10],
+            pub trap_cell_val: [u64; 10],
+            pub trap_cell_tag: [u8; 10],
+            pub trap_cell_info: [u64; 10],
+            pub dam: [u64; 32],
+            pub sbbp: [u64; 32],
+            pub mlt: [u64; 48],
+            pub upsr: u64,
+        }
+
+        #[repr(C)]
+        #[derive(Clone)]
+        #[doc(hidden)]
+        pub struct extra_ucontext {
+            pub sizeof_extra_uc: i32,
+            pub curr_cnt: i32,
+            pub tc_count: i32,
+            pub fpcr: i32,
+            pub fpsr: i32,
+            pub pfpfr: i32,
+            pub ctpr1: u64,
+            pub ctpr2: u64,
+            pub ctpr3: u64,
+            pub sc_need_rstrt: i32,
+            pub ctpr1_hi: u64,
+            pub ctpr2_hi: u64,
+            pub ctpr3_hi: u64,
+            pub chain_stack_offset: u64,
+            pub proc_stack_offset: u64,
+            pub bgr: u32,
+            pub g: [u64; 16],
+            pub gtag: [u8; 16],
+            pub gext: [u64; 16],
+            pub gext_tag: [u8; 16],
+            pub lsr: u64,
+            pub ilcr: u64,
+            pub lsr1: u64,
+            pub ilcr1: u64,
+            pub aad: [__c_anonymous_aad; 32],
+            pub aaind: [u64; 16],
+            pub aaincr: [u64; 8],
+            pub aaldi: [u64; 64],
+            pub aaldv: u64,
+            pub aalda: [u64; 64],
+            pub aaldm: u64,
+            pub aasr: u64,
+            pub aafstr: u64,
+            pub aasti: [u64; 16],
+        }
+
+        #[repr(C)]
+        #[derive(Clone)]
+        #[doc(hidden)]
+        pub struct __c_anonymous_aad {
+            pub lo: u64,
+            pub hi: u64,
         }
     } else if #[cfg(target_arch = "riscv64")] {
         #[repr(C)]

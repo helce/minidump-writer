@@ -20,6 +20,8 @@ cfg_if::cfg_if! {
         mod aarch64;
     } else if #[cfg(target_arch = "arm")] {
         mod arm;
+    } else if #[cfg(target_arch = "e2k")] {
+        mod e2k;
     } else if #[cfg(target_arch = "riscv64")] {
         mod riscv64;
     } else if #[cfg(target_arch = "s390x")] {
