@@ -136,6 +136,7 @@ impl ProcessInspector {
         }
     }
 
+    #[cfg(not(target_arch = "e2k"))]
     pub fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs, Error> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.get_fp_regs(tid).map_err(Error::Local),
