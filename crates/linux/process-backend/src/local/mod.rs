@@ -19,6 +19,26 @@ type PtraceRequestType = core::ffi::c_uint;
 #[cfg(not(target_env = "gnu"))]
 type PtraceRequestType = core::ffi::c_int;
 
+/// Pre-populates fields inside uninitialized memory before calling ptrace
+pub trait PtraceRegsInit {
+    unsafe fn pre_init(ptr: *mut Self) {
+        let _ = ptr;
+    }
+}
+
+#[cfg(not(target_arch = "e2k"))]
+impl PtraceRegsInit for GenRegs {}
+
+#[cfg(target_arch = "e2k")]
+impl PtraceRegsInit for GenRegs {
+    unsafe fn pre_init(ptr: *mut Self) {
+        unsafe {
+            core::ptr::addr_of_mut!((*ptr).sizeof_struct)
+                .write(core::mem::size_of::<GenRegs>() as u64);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Backend {
     pid: pid_t,
@@ -198,7 +218,7 @@ impl Backend {
     }
 
     fn getregset(&self, _pid: libc::pid_t) -> Result<GenRegs, Error> {
-        #[cfg(target_arch = "arm")]
+        #[cfg(any(target_arch = "arm", target_arch = "e2k"))]
         {
             Err(Error::NotSupported)
         }
@@ -215,6 +235,10 @@ impl Backend {
     }
 
     fn getfpregset(&self, pid: libc::pid_t) -> Result<FpRegs, Error> {
+        #[cfg(target_arch = "e2k")]
+        {
+            Err(Error::NotSupported)
+        }
         #[cfg(target_arch = "arm")]
         {
             const NT_ARM_VFP: usize = 0x400;
@@ -228,7 +252,7 @@ impl Backend {
     }
 
     fn getfpregs(&self, _pid: libc::pid_t) -> Result<FpRegs, Error> {
-        #[cfg(target_arch = "arm")]
+        #[cfg(any(target_arch = "arm", target_arch = "e2k"))]
         {
             Err(Error::NotSupported)
         }
@@ -240,12 +264,15 @@ impl Backend {
     }
 
     /// Safety: RequestType and T must agree on the size of the returned type
-    unsafe fn ptrace_getregs<T>(
+    unsafe fn ptrace_getregs<T: PtraceRegsInit>(
         &self,
         request: PtraceRequestType,
         pid: libc::pid_t,
     ) -> Result<T, Error> {
         let mut output = mem::MaybeUninit::<T>::uninit();
+        unsafe {
+            T::pre_init(output.as_mut_ptr());
+        }
         self.standard_syscall(|| unsafe {
             ptrace(
                 request,
