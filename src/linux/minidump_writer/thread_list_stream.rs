@@ -296,13 +296,12 @@ impl MinidumpWriter {
         stack_ptr: usize,
         is_procedure: bool,
     ) -> Result<(), SectionThreadListError> {
-        let page_size = match nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE) {
-            Ok(Some(ps)) => ps as usize,
-            _ => 1 as usize,
-        };
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        assert!(page_size > 0);
         let stack_ptr = (stack_ptr + (page_size - 1)) & !(page_size - 1);
         let stack_len = stack_ptr - stack_base;
         let stack_bytes = MinidumpWriter::copy_from_process(
+            &self.process_inspector,
             thread.thread_id.try_into()?,
             stack_base,
             stack_len,

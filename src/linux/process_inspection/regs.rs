@@ -35,6 +35,12 @@ mod imp {
     }
 }
 
+#[cfg(target_arch = "e2k")]
+mod imp {
+    pub type GenRegs = libc::user_regs_struct;
+    pub struct FpRegs; // Dummy zero-sized type
+}
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod imp {
     pub type GenRegs = user_regs_struct;

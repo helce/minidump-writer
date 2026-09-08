@@ -1,7 +1,4 @@
-use {
-    super::CrashContext,
-    crate::{minidump_cpu::RawContextCPU, minidump_format::format::ContextFlagsCpu},
-};
+use {super::CrashContext, crate::minidump_cpu::RawContextCPU};
 
 impl CrashContext {
     pub fn get_stack_pointer(&self) -> usize {
@@ -38,7 +35,8 @@ impl CrashContext {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = ContextFlagsCpu::CONTEXT_E2K.bits();
+        out.context_flags =
+            crate::minidump_format::format::ContextFlagsCpu::CONTEXT_E2K.bits();
 
         out.usbr = self.inner.context.uc_mcontext.sbr;
         out.usd_lo = self.inner.context.uc_mcontext.usd_lo;

@@ -217,8 +217,28 @@ pub enum SuspendResumeThreadError {
     ),
 }
 
+/// Pre-populates fields inside uninitialized memory before calling ptrace
+pub trait PtraceRegsInit {
+    unsafe fn pre_init(ptr: *mut Self) {
+        let _ = ptr;
+    }
+}
+
+#[cfg(not(target_arch = "e2k"))]
+impl PtraceRegsInit for GenRegs {}
+
+#[cfg(target_arch = "e2k")]
+impl PtraceRegsInit for GenRegs {
+    unsafe fn pre_init(ptr: *mut Self) {
+        unsafe {
+            core::ptr::addr_of_mut!((*ptr).sizeof_struct)
+                .write(core::mem::size_of::<GenRegs>() as u64);
+        }
+    }
+}
+
 fn getregset(_pid: libc::pid_t) -> nix::Result<GenRegs> {
-    #[cfg(target_arch = "arm")]
+    #[cfg(any(target_arch = "arm", target_arch = "e2k"))]
     {
         Err(Errno::ENOTSUP)
     }
@@ -235,6 +255,10 @@ fn getregs(pid: libc::pid_t) -> nix::Result<GenRegs> {
 }
 
 fn getfpregset(pid: libc::pid_t) -> nix::Result<FpRegs> {
+    #[cfg(target_arch = "e2k")]
+    {
+        Err(Errno::ENOTSUP)
+    }
     #[cfg(target_arch = "arm")]
     {
         const NT_ARM_VFP: usize = 0x400;
@@ -248,7 +272,7 @@ fn getfpregset(pid: libc::pid_t) -> nix::Result<FpRegs> {
 }
 
 fn getfpregs(_pid: libc::pid_t) -> nix::Result<FpRegs> {
-    #[cfg(target_arch = "arm")]
+    #[cfg(any(target_arch = "arm", target_arch = "e2k"))]
     {
         Err(Errno::ENOTSUP)
     }
@@ -260,9 +284,14 @@ fn getfpregs(_pid: libc::pid_t) -> nix::Result<FpRegs> {
 }
 
 /// Safety: RequestType and T must agree on the size of the returned type
-unsafe fn ptrace_getregs<T>(request: PtraceRequestType, pid: libc::pid_t) -> nix::Result<T> {
+unsafe fn ptrace_getregs<T: PtraceRegsInit>(
+    request: PtraceRequestType,
+    pid: libc::pid_t
+) -> nix::Result<T> {
     let mut output = mem::MaybeUninit::<T>::uninit();
-
+    unsafe {
+        T::pre_init(output.as_mut_ptr());
+    }
     // Since ptrace() is vararg, best to explicitly state arg types
     let addr: *mut c_void = core::ptr::null_mut();
     let data: *mut c_void = output.as_mut_ptr().cast();
