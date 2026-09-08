@@ -11,7 +11,7 @@ use {
         crash_context::CrashContext,
         maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
-        module_reader::{BuildId, ReadFromModule},
+        module_reader::{self},
     },
     nix::{errno::Errno, sys::signal::Signal},
     procfs_core::process::MMPermissions,
@@ -35,7 +35,7 @@ enum Context {
 impl Context {
     pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
         let mut mw = MinidumpWriterConfig::new(pid, pid);
-        #[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+        #[cfg(not(target_arch = "e2k"))]
         if self == &Context::With {
             let crash_context = get_crash_context(pid);
             mw.set_crash_context(crash_context);
@@ -44,7 +44,7 @@ impl Context {
     }
 }
 
-#[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+#[cfg(not(target_arch = "e2k"))]
 fn get_ucontext() -> Result<crash_context::ucontext_t> {
     let mut context = std::mem::MaybeUninit::uninit();
     unsafe {
@@ -55,7 +55,7 @@ fn get_ucontext() -> Result<crash_context::ucontext_t> {
     }
 }
 
-#[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+#[cfg(not(target_arch = "e2k"))]
 fn get_crash_context(tid: Pid) -> CrashContext {
     let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
@@ -86,7 +86,7 @@ macro_rules! contextual_test {
                 test(Context::Without)
             }
 
-            #[cfg(not(any(target_arch = "e2k", target_arch = "mips")))]
+            #[cfg(not(target_arch = "e2k"))]
             #[test]
             $(#[$attr])?
             fn with_context() {
@@ -733,8 +733,9 @@ fn with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let BuildId(mut build_id) =
-        BuildId::read_from_module(mem_slice.as_slice().into()).expect("Failed to get build_id");
+    let mut build_id =
+        module_reader::read_build_id_from_module(SliceModuleMemoryReader(mem_slice.as_slice()))
+            .expect("Failed to get build_id");
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 
